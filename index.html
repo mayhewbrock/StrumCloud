@@ -1,8 +1,11 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>StrumCloud — Omnichord Emulation</title>
     <style>
         :root {
@@ -16,1279 +19,1228 @@
             --warning: #ffd93d;
             --radius: 14px;
             --font: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+            /* Safe area insets for notched phones */
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
+            --safe-left: env(safe-area-inset-left, 0px);
+            --safe-right: env(safe-area-inset-right, 0px);
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+```
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
 
-        body {
-            background: var(--bg);
-            font-family: var(--font);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            overflow: hidden;
-            user-select: none;
-            -webkit-user-select: none;
-            -webkit-tap-highlight-color: transparent;
-        }
+    html {
+        /* Prevent iOS font size adjustment on orientation change */
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+    }
 
+    body {
+        background: var(--bg);
+        font-family: var(--font);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        /* Use dvh for mobile browsers (accounts for browser chrome) */
+        min-height: 100vh;
+        min-height: -webkit-fill-available;
+        min-height: 100dvh;
+        overflow: hidden;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        /* Prevent overscroll bounce on iOS */
+        overscroll-behavior: none;
+        touch-action: none;
+    }
+
+    .app-container {
+        position: relative;
+        width: 100%;
+        width: calc(100% - var(--safe-left) - var(--safe-right));
+        height: 100vh;
+        height: 100dvh;
+        max-width: 960px;
+        max-height: 720px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+    }
+
+    .canvas-wrapper {
+        position: relative;
+        width: 100%;
+        height: 75%;
+        max-height: 540px;
+        border-radius: var(--radius);
+        overflow: hidden;
+        box-shadow: 0 0 60px var(--glow), 0 0 0 2px rgba(255, 255, 255, 0.06);
+        background: #000;
+        /* Allow touch events to reach canvas */
+        touch-action: none;
+    }
+
+    canvas#mainCanvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+    }
+
+    video#webcam {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    /* ── Start overlay ── */
+    #startOverlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+        background: rgba(10, 10, 15, 0.85);
+        cursor: pointer;
+        border-radius: var(--radius);
+        transition: opacity 0.5s ease;
+        padding: 20px;
+        text-align: center;
+    }
+    #startOverlay.hidden {
+        opacity: 0;
+        pointer-events: none;
+    }
+    #startOverlay h1 {
+        font-size: clamp(1.8rem, 5vw, 3.5rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 8px;
+    }
+    #startOverlay p {
+        color: #aaa;
+        font-size: clamp(0.8rem, 2.5vw, 1rem);
+        margin-bottom: 20px;
+        text-align: center;
+        line-height: 1.5;
+    }
+    #startOverlay .btn-start {
+        padding: 14px 40px;
+        font-size: clamp(0.95rem, 3vw, 1.1rem);
+        font-weight: 600;
+        border: 2px solid var(--accent);
+        background: transparent;
+        color: var(--accent);
+        border-radius: 50px;
+        cursor: pointer;
+        letter-spacing: 0.03em;
+        transition: all 0.25s ease;
+        /* Ensure comfortable touch target */
+        min-height: 48px;
+        touch-action: manipulation;
+    }
+    #startOverlay .btn-start:hover,
+    #startOverlay .btn-start:active {
+        background: var(--accent);
+        color: #000;
+        box-shadow: 0 0 30px var(--glow);
+    }
+
+    /* Landscape hint — shows only on portrait mobile */
+    .landscape-hint {
+        display: none;
+        margin-top: 12px;
+        font-size: 0.75rem;
+        color: #666;
+        letter-spacing: 0.02em;
+    }
+    .landscape-hint span {
+        display: inline-block;
+        border: 1px solid #444;
+        border-radius: 4px;
+        padding: 2px 8px;
+        color: #888;
+    }
+
+    /* ── Info panel ── */
+    .info-panel {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        justify-content: center;
+        padding: 8px 16px;
+        background: var(--surface);
+        border-radius: var(--radius);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        min-height: 48px;
+        width: 100%;
+    }
+    .chord-name {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: var(--accent);
+        letter-spacing: 0.02em;
+        min-width: 120px;
+        text-align: center;
+        text-shadow: 0 0 20px var(--glow);
+        transition: color 0.2s;
+    }
+    .chord-name.idle {
+        color: #555;
+        text-shadow: none;
+    }
+    .strum-indicator {
+        font-size: 0.85rem;
+        color: #888;
+        padding: 6px 14px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        transition: all 0.15s ease;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+    }
+    .strum-indicator.active {
+        color: #fff;
+        background: var(--accent2);
+        border-color: var(--accent2);
+        box-shadow: 0 0 24px rgba(255, 110, 199, 0.5);
+        animation: strumPulse 0.3s ease-out;
+    }
+    @keyframes strumPulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.12); }
+    }
+
+    .btn-rhythm {
+        padding: 8px 20px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        border: 2px solid var(--warning);
+        background: transparent;
+        color: var(--warning);
+        border-radius: 50px;
+        cursor: pointer;
+        letter-spacing: 0.03em;
+        transition: all 0.25s ease;
+        white-space: nowrap;
+        /* Comfortable touch target */
+        min-height: 44px;
+        touch-action: manipulation;
+    }
+    .btn-rhythm.active {
+        background: var(--warning);
+        color: #000;
+        box-shadow: 0 0 20px rgba(255, 217, 61, 0.45);
+        animation: rhythmGlow 1s ease-in-out infinite;
+    }
+    @keyframes rhythmGlow {
+        0%, 100% { box-shadow: 0 0 20px rgba(255, 217, 61, 0.45); }
+        50% { box-shadow: 0 0 40px rgba(255, 217, 61, 0.8); }
+    }
+    .btn-rhythm:hover { background: rgba(255, 217, 61, 0.15); }
+    .btn-rhythm.active:hover { background: var(--warning); color: #000; }
+
+    .gesture-hint {
+        font-size: 0.75rem;
+        color: #666;
+        letter-spacing: 0.03em;
+        text-align: center;
+        line-height: 1.5;
+    }
+
+    /* ════════════════════════════════
+       RESPONSIVE — Mobile portrait
+       ════════════════════════════════ */
+    @media (max-width: 640px) {
         .app-container {
-            position: relative;
-            width: 100vw;
-            height: 100vh;
-            max-width: 960px;
-            max-height: 720px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
+            max-height: 100dvh;
+            gap: 6px;
+            padding-top: max(8px, var(--safe-top));
+            padding-bottom: max(8px, var(--safe-bottom));
+            padding-left: max(8px, var(--safe-left));
+            padding-right: max(8px, var(--safe-right));
         }
-
         .canvas-wrapper {
-            position: relative;
-            width: 100%;
-            height: 75%;
-            max-height: 540px;
-            border-radius: var(--radius);
-            overflow: hidden;
-            box-shadow: 0 0 60px var(--glow), 0 0 0 2px rgba(255, 255, 255, 0.06);
-            background: #000;
-        }
-
-        canvas#mainCanvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
-
-        video#webcam {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 1px;
-            height: 1px;
-            opacity: 0;
-            pointer-events: none;
-        }
-
-        /* Start overlay */
-        #startOverlay {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 10;
-            background: rgba(10, 10, 15, 0.85);
-            cursor: pointer;
-            border-radius: var(--radius);
-            transition: opacity 0.5s ease;
-        }
-        #startOverlay.hidden {
-            opacity: 0;
-            pointer-events: none;
-        }
-        #startOverlay h1 {
-            font-size: clamp(2rem, 5vw, 3.5rem);
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            background: linear-gradient(135deg, var(--accent), var(--accent2));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin-bottom: 8px;
-        }
-        #startOverlay p {
-            color: #aaa;
-            font-size: 1rem;
-            margin-bottom: 20px;
-            text-align: center;
-            line-height: 1.5;
-        }
-        #startOverlay .btn-start {
-            padding: 14px 40px;
-            font-size: 1.1rem;
-            font-weight: 600;
-            border: 2px solid var(--accent);
-            background: transparent;
-            color: var(--accent);
-            border-radius: 50px;
-            cursor: pointer;
-            letter-spacing: 0.03em;
-            transition: all 0.25s ease;
-        }
-        #startOverlay .btn-start:hover {
-            background: var(--accent);
-            color: #000;
-            box-shadow: 0 0 30px var(--glow);
-        }
-
-        /* Info panel */
-        .info-panel {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            flex-wrap: wrap;
-            justify-content: center;
-            padding: 8px 16px;
-            background: var(--surface);
-            border-radius: var(--radius);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            min-height: 48px;
+            height: 62%;
+            max-height: none;
+            border-radius: 8px;
         }
         .chord-name {
-            font-size: 1.6rem;
-            font-weight: 700;
-            color: var(--accent);
-            letter-spacing: 0.02em;
-            min-width: 120px;
-            text-align: center;
-            text-shadow: 0 0 20px var(--glow);
-            transition: color 0.2s;
+            font-size: 1.2rem;
+            min-width: 80px;
         }
-        .chord-name.idle {
-            color: #555;
-            text-shadow: none;
+        .info-panel {
+            gap: 8px;
+            padding: 6px 10px;
+            min-height: 40px;
         }
         .strum-indicator {
-            font-size: 0.85rem;
-            color: #888;
-            padding: 6px 14px;
-            border-radius: 20px;
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            transition: all 0.15s ease;
-            letter-spacing: 0.02em;
+            font-size: 0.78rem;
+            padding: 5px 10px;
         }
-        .strum-indicator.active {
-            color: #fff;
-            background: var(--accent2);
-            border-color: var(--accent2);
-            box-shadow: 0 0 24px rgba(255, 110, 199, 0.5);
-            animation: strumPulse 0.3s ease-out;
-        }
-        @keyframes strumPulse {
-            0%,
-            100% {
-                transform: scale(1);
-            }
-            50% {
-                transform: scale(1.12);
-            }
-        }
-
         .btn-rhythm {
-            padding: 8px 20px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            border: 2px solid var(--warning);
-            background: transparent;
-            color: var(--warning);
-            border-radius: 50px;
-            cursor: pointer;
-            letter-spacing: 0.03em;
-            transition: all 0.25s ease;
-            white-space: nowrap;
+            padding: 6px 14px;
+            font-size: 0.8rem;
         }
-        .btn-rhythm.active {
-            background: var(--warning);
-            color: #000;
-            box-shadow: 0 0 20px rgba(255, 217, 61, 0.45);
-            animation: rhythmGlow 1s ease-in-out infinite;
-        }
-        @keyframes rhythmGlow {
-            0%,
-            100% {
-                box-shadow: 0 0 20px rgba(255, 217, 61, 0.45);
-            }
-            50% {
-                box-shadow: 0 0 40px rgba(255, 217, 61, 0.8);
-            }
-        }
-        .btn-rhythm:hover {
-            background: rgba(255, 217, 61, 0.15);
-        }
-        .btn-rhythm.active:hover {
-            background: var(--warning);
-            color: #000;
-        }
-
         .gesture-hint {
+            font-size: 0.68rem;
+            letter-spacing: 0.01em;
+        }
+        /* Show landscape hint on small portrait screens */
+        .landscape-hint {
+            display: block;
+        }
+    }
+
+    /* ════════════════════════════════
+       RESPONSIVE — Very small screens
+       ════════════════════════════════ */
+    @media (max-width: 380px) {
+        .canvas-wrapper {
+            height: 58%;
+        }
+        .info-panel {
+            gap: 6px;
+        }
+        .strum-indicator {
+            display: none; /* Hide to save space on tiny screens */
+        }
+        .gesture-hint {
+            font-size: 0.62rem;
+        }
+    }
+
+    /* ════════════════════════════════
+       RESPONSIVE — Landscape mobile
+       (short viewport, wide screen)
+       ════════════════════════════════ */
+    @media (max-height: 520px) and (orientation: landscape) {
+        .app-container {
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 6px;
+            max-height: 100dvh;
+            padding: max(4px, var(--safe-top)) max(8px, var(--safe-right)) max(4px, var(--safe-bottom)) max(8px, var(--safe-left));
+        }
+        .canvas-wrapper {
+            height: 100%;
+            max-height: none;
+            width: calc(100% - 220px);
+            flex: 1;
+            border-radius: 8px;
+        }
+        .info-panel {
+            width: 200px;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 6px;
+            padding: 8px;
+            align-self: center;
+            min-height: unset;
+        }
+        .chord-name {
+            font-size: 1.1rem;
+            min-width: unset;
+        }
+        .strum-indicator {
             font-size: 0.75rem;
-            color: #666;
-            letter-spacing: 0.03em;
             text-align: center;
         }
-
-        /* Responsive */
-        @media (max-width: 640px) {
-            .app-container {
-                max-height: 100vh;
-                gap: 6px;
-            }
-            .canvas-wrapper {
-                height: 60%;
-                max-height: 380px;
-                border-radius: 8px;
-            }
-            .chord-name {
-                font-size: 1.2rem;
-                min-width: 80px;
-            }
-            .info-panel {
-                gap: 8px;
-                padding: 6px 10px;
-            }
-            .btn-rhythm {
-                padding: 6px 14px;
-                font-size: 0.8rem;
-            }
+        .btn-rhythm {
+            font-size: 0.78rem;
+            padding: 6px 10px;
+            text-align: center;
         }
-    </style>
+        .gesture-hint {
+            width: 200px;
+            font-size: 0.62rem;
+            align-self: flex-end;
+        }
+        /* Hide landscape hint when already landscape */
+        .landscape-hint {
+            display: none !important;
+        }
+    }
+
+    /* ════════════════════════════════
+       RESPONSIVE — Tablet portrait
+       ════════════════════════════════ */
+    @media (min-width: 641px) and (max-width: 900px) {
+        .app-container {
+            max-height: 100dvh;
+            gap: 8px;
+        }
+        .canvas-wrapper {
+            height: 70%;
+            max-height: none;
+        }
+    }
+</style>
+```
+
 </head>
 <body>
 
-    <div class="app-container">
-        <!-- Canvas & Video -->
-        <div class="canvas-wrapper" id="canvasWrapper">
-            <canvas id="mainCanvas"></canvas>
-            <video id="webcam" playsinline autoplay muted></video>
-            <!-- Start overlay -->
-            <div id="startOverlay">
-                <h1>🎸 StrumCloud</h1>
-                <p>
-                    Left Hand → Chord Buttons<br>
-                    Right Hand → Strum Trigger
-                </p>
-                <button class="btn-start" id="btnStart">✨ Click to Start</button>
-            </div>
-        </div>
-
-        <!-- Info Panel -->
-        <div class="info-panel">
-            <span class="chord-name idle" id="chordDisplay">--</span>
-            <span class="strum-indicator" id="strumIndicator">🎵 Strum Zone</span>
-            <button class="btn-rhythm" id="btnRhythm">🥁 Rhythm Off</button>
-        </div>
-        <div class="gesture-hint" id="gestureHint">
-            Left: 1 finger = Major · 2 = Minor · 3 = Dom7 · 4 = Maj7 · 5 = Dim
+```
+<div class="app-container">
+    <!-- Canvas & Video -->
+    <div class="canvas-wrapper" id="canvasWrapper">
+        <canvas id="mainCanvas"></canvas>
+        <video id="webcam" playsinline autoplay muted></video>
+        <!-- Start overlay -->
+        <div id="startOverlay">
+            <h1>🎸 StrumCloud</h1>
+            <p>
+                Left Hand → Chord Buttons<br>
+                Right Hand → Strum Trigger
+            </p>
+            <button class="btn-start" id="btnStart">✨ Tap to Start</button>
+            <p class="landscape-hint">
+                Best experience in <span>⟳ Landscape</span>
+            </p>
         </div>
     </div>
 
-    <!-- Tone.js -->
-    <script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.min.js">
-    </script>
-    <!-- MediaPipe Hands -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js">
-    </script>
+    <!-- Info Panel -->
+    <div class="info-panel">
+        <span class="chord-name idle" id="chordDisplay">--</span>
+        <span class="strum-indicator" id="strumIndicator">🎵 Strum Zone</span>
+        <button class="btn-rhythm" id="btnRhythm">🥁 Rhythm Off</button>
+    </div>
+    <div class="gesture-hint" id="gestureHint">
+        Left: 1 finger = Major · 2 = Minor · 3 = Dom7 · 4 = Maj7 · 5 = Dim
+    </div>
+</div>
 
-    <script>
-        (function() {
-            // ──────────────────────────────────
-            // DOM Elements
-            // ──────────────────────────────────
-            const canvas = document.getElementById('mainCanvas');
-            const ctx = canvas.getContext('2d');
-            const video = document.getElementById('webcam');
-            const startOverlay = document.getElementById('startOverlay');
-            const btnStart = document.getElementById('btnStart');
-            const chordDisplay = document.getElementById('chordDisplay');
-            const strumIndicator = document.getElementById('strumIndicator');
-            const btnRhythm = document.getElementById('btnRhythm');
-            const gestureHint = document.getElementById('gestureHint');
-            const canvasWrapper = document.getElementById('canvasWrapper');
+<!-- Tone.js -->
+<script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.min.js"></script>
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
 
-            // ──────────────────────────────────
-            // State
-            // ──────────────────────────────────
-            let handsInstance = null;
-            let isRunning = false;
-            let latestHandData = null; // { left: landmarks|null, right: landmarks|null }
-            let currentChordType = null; // 'major' | 'minor' | 'dom7' | 'maj7' | 'dim'
-            let currentRootMidi = 60; // MIDI note number (default C4)
-            let currentRootName = 'C';
-            let strumCooldownUntil = 0;
-            let strumVelocity = 0;
-            let rightHandPrevX = null;
-            let rightHandInStrumZone = false;
-            let rhythmActive = false;
-            let rhythmLoop = null;
-            let strumFlashAlpha = 0;
-            let particles = [];
+<script>
+    (function() {
+        // ──────────────────────────────────
+        // DOM Elements
+        // ──────────────────────────────────
+        const canvas = document.getElementById('mainCanvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('webcam');
+        const startOverlay = document.getElementById('startOverlay');
+        const btnStart = document.getElementById('btnStart');
+        const chordDisplay = document.getElementById('chordDisplay');
+        const strumIndicator = document.getElementById('strumIndicator');
+        const btnRhythm = document.getElementById('btnRhythm');
+        const gestureHint = document.getElementById('gestureHint');
+        const canvasWrapper = document.getElementById('canvasWrapper');
 
-            // ──────────────────────────────────
-            // Chord Definitions (semitones from root)
-            // ──────────────────────────────────
-            const chordTypes = {
-                'major': { name: 'Major', intervals: [0, 4, 7], color: '#64ffda' },
-                'minor': { name: 'Minor', intervals: [0, 3, 7], color: '#82b1ff' },
-                'dom7': { name: 'Dom 7th', intervals: [0, 4, 7, 10], color: '#ff6ec7' },
-                'maj7': { name: 'Maj 7th', intervals: [0, 4, 7, 11], color: '#ffd93d' },
-                'dim': { name: 'Diminished', intervals: [0, 3, 6], color: '#ff6b6b' },
-            };
+        // ──────────────────────────────────
+        // State
+        // ──────────────────────────────────
+        let handsInstance = null;
+        let isRunning = false;
+        let latestHandData = null;
+        let currentChordType = null;
+        let currentRootMidi = 60;
+        let currentRootName = 'C';
+        let strumCooldownUntil = 0;
+        let strumVelocity = 0;
+        let rightHandPrevX = null;
+        let rightHandInStrumZone = false;
+        let rhythmActive = false;
+        let rhythmLoop = null;
+        let strumFlashAlpha = 0;
+        let particles = [];
 
-            const fingerToChord = {
-                1: 'major',
-                2: 'minor',
-                3: 'dom7',
-                4: 'maj7',
-                5: 'dim',
-            };
+        // ──────────────────────────────────
+        // Chord Definitions
+        // ──────────────────────────────────
+        const chordTypes = {
+            'major': { name: 'Major', intervals: [0, 4, 7], color: '#64ffda' },
+            'minor': { name: 'Minor', intervals: [0, 3, 7], color: '#82b1ff' },
+            'dom7':  { name: 'Dom 7th', intervals: [0, 4, 7, 10], color: '#ff6ec7' },
+            'maj7':  { name: 'Maj 7th', intervals: [0, 4, 7, 11], color: '#ffd93d' },
+            'dim':   { name: 'Diminished', intervals: [0, 3, 6], color: '#ff6b6b' },
+        };
 
-            const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const fingerToChord = { 1: 'major', 2: 'minor', 3: 'dom7', 4: 'maj7', 5: 'dim' };
+        const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-            function midiToNoteName(midi) {
-                const octave = Math.floor(midi / 12) - 1;
-                const name = noteNames[midi % 12];
-                return `${name}${octave}`;
-            }
+        function midiToNoteName(midi) {
+            const octave = Math.floor(midi / 12) - 1;
+            return `${noteNames[midi % 12]}${octave}`;
+        }
+        function midiToRootName(midi) { return noteNames[midi % 12]; }
 
-            function midiToRootName(midi) {
-                return noteNames[midi % 12];
-            }
+        // ──────────────────────────────────
+        // Audio Engine (Tone.js)
+        // ──────────────────────────────────
+        let chordSynth = null;
+        let reverb = null;
+        let drumKick = null;
+        let drumSnare = null;
+        let drumHihat = null;
+        let audioReady = false;
 
-            // ──────────────────────────────────
-            // Audio Engine (Tone.js)
-            // ──────────────────────────────────
-            let chordSynth = null;
-            let reverb = null;
-            let drumKick = null;
-            let drumSnare = null;
-            let drumHihat = null;
-            let audioReady = false;
+        async function initAudio() {
+            if (audioReady) return;
+            await Tone.start();
+            reverb = new Tone.Reverb({ decay: 2.5, wet: 0.35, preDelay: 0.05 }).toDestination();
 
-            async function initAudio() {
-                if (audioReady) return;
-                await Tone.start();
-                // Create synth for chords — harp-like polyphonic synth
-                reverb = new Tone.Reverb({
-                    decay: 2.5,
-                    wet: 0.35,
-                    preDelay: 0.05,
-                }).toDestination();
+            chordSynth = new Tone.PolySynth(Tone.Synth, {
+                maxPolyphony: 8,
+                voice: Tone.Synth,
+                options: {
+                    oscillator: { type: 'triangle8' },
+                    envelope: { attack: 0.005, decay: 0.8, sustain: 0.3, release: 1.6 },
+                    volume: -8,
+                },
+            }).connect(reverb);
 
-                chordSynth = new Tone.PolySynth(Tone.Synth, {
-                    maxPolyphony: 8,
-                    voice: Tone.Synth,
-                    options: {
-                        oscillator: {
-                            type: 'triangle8',
-                        },
-                        envelope: {
-                            attack: 0.005,
-                            decay: 0.8,
-                            sustain: 0.3,
-                            release: 1.6,
-                        },
-                        volume: -8,
-                    },
-                }).connect(reverb);
+            drumKick = new Tone.MembraneSynth({
+                pitchDecay: 0.08, octaves: 6,
+                oscillator: { type: 'sine' },
+                envelope: { attack: 0.001, decay: 0.35, sustain: 0, release: 0.05 },
+                volume: -4,
+            }).toDestination();
 
-                // Drum synths
-                drumKick = new Tone.MembraneSynth({
-                    pitchDecay: 0.08,
-                    octaves: 6,
-                    oscillator: { type: 'sine' },
-                    envelope: { attack: 0.001, decay: 0.35, sustain: 0, release: 0.05 },
-                    volume: -4,
-                }).toDestination();
+            drumSnare = new Tone.NoiseSynth({
+                noise: { type: 'white' },
+                envelope: { attack: 0.001, decay: 0.18, sustain: 0, release: 0.02 },
+                volume: -10,
+            }).toDestination();
+            const snareFilter = new Tone.Filter({ frequency: 1800, type: 'bandpass', Q: 1.2 });
+            drumSnare.disconnect();
+            drumSnare.connect(snareFilter);
+            snareFilter.toDestination();
 
-                drumSnare = new Tone.NoiseSynth({
-                    noise: { type: 'white' },
-                    envelope: { attack: 0.001, decay: 0.18, sustain: 0, release: 0.02 },
-                    volume: -10,
-                }).toDestination();
-                // Bandpass filter for snare
-                const snareFilter = new Tone.Filter({
-                    frequency: 1800,
-                    type: 'bandpass',
-                    Q: 1.2,
-                });
-                drumSnare.disconnect();
-                drumSnare.connect(snareFilter);
-                snareFilter.toDestination();
+            drumHihat = new Tone.NoiseSynth({
+                noise: { type: 'white' },
+                envelope: { attack: 0.001, decay: 0.06, sustain: 0, release: 0.01 },
+                volume: -16,
+            }).toDestination();
+            const hihatFilter = new Tone.Filter({ frequency: 9000, type: 'highpass', Q: 0.8 });
+            drumHihat.disconnect();
+            drumHihat.connect(hihatFilter);
+            hihatFilter.toDestination();
 
-                drumHihat = new Tone.NoiseSynth({
-                    noise: { type: 'white' },
-                    envelope: { attack: 0.001, decay: 0.06, sustain: 0, release: 0.01 },
-                    volume: -16,
-                }).toDestination();
-                const hihatFilter = new Tone.Filter({
-                    frequency: 9000,
-                    type: 'highpass',
-                    Q: 0.8,
-                });
-                drumHihat.disconnect();
-                drumHihat.connect(hihatFilter);
-                hihatFilter.toDestination();
+            audioReady = true;
+            console.log('🎵 Audio engine ready');
+        }
 
-                audioReady = true;
-                console.log('🎵 Audio engine ready');
-            }
+        function playChordArpeggio(rootMidi, intervals, velocity) {
+            if (!audioReady || !chordSynth) return;
+            const notes = intervals.map(i => rootMidi + i);
+            const baseSpacing = 0.09;
+            const spacing = Math.max(0.035, Math.min(0.18, baseSpacing / Math.max(0.3, velocity)));
+            const now = Tone.now();
+            const noteDuration = 1.8;
 
-            function playChordArpeggio(rootMidi, intervals, velocity) {
-                if (!audioReady || !chordSynth) return;
-                const notes = intervals.map(interval => rootMidi + interval);
-                // Map velocity to inter-note spacing (faster strum = tighter arpeggio)
-                const baseSpacing = 0.09; // seconds between notes at medium velocity
-                const spacing = Math.max(0.035, Math.min(0.18, baseSpacing / Math.max(0.3, velocity)));
-                const now = Tone.now();
-                const noteDuration = 1.8; // seconds — natural decay like Omnichord harp
-
-                notes.forEach((note, i) => {
-                    const time = now + i * spacing;
-                    chordSynth.triggerAttackRelease(
-                        Tone.Frequency(note, 'midi').toFrequency(),
-                        noteDuration,
-                        time
-                    );
-                });
-
-                // Also play the root an octave lower for fullness on triads
-                if (intervals.length <= 4) {
-                    const bassNote = rootMidi - 12;
-                    const bassTime = now;
-                    chordSynth.triggerAttackRelease(
-                        Tone.Frequency(bassNote, 'midi').toFrequency(),
-                        noteDuration * 1.1,
-                        bassTime
-                    );
-                }
-            }
-
-            function startRhythm() {
-                if (!audioReady) return;
-                if (rhythmLoop) rhythmLoop.stop();
-                const bpm = 100;
-                Tone.Transport.bpm.value = bpm;
-                let beat = 0;
-                rhythmLoop = new Tone.Loop((time) => {
-                    const beatInBar = beat % 8;
-                    // Kick on 1 and 5 (beats 1 & 3 in 4/4 with 8th note subdivision)
-                    if (beatInBar === 0 || beatInBar === 4) {
-                        drumKick.triggerAttackRelease('C2', '8n', time);
-                    }
-                    // Snare on 3 and 7 (beats 2 & 4)
-                    if (beatInBar === 2 || beatInBar === 6) {
-                        drumSnare.triggerAttackRelease('8n', time);
-                    }
-                    // Hi-hat on all 8th notes
-                    drumHihat.triggerAttackRelease('16n', time, 0.35 + Math.random() * 0.15);
-                    beat++;
-                }, '8n');
-                rhythmLoop.start(0);
-                Tone.Transport.start();
-                rhythmActive = true;
-                btnRhythm.textContent = '🥁 Rhythm On';
-                btnRhythm.classList.add('active');
-                console.log('🥁 Rhythm started');
-            }
-
-            function stopRhythm() {
-                if (rhythmLoop) rhythmLoop.stop();
-                rhythmLoop = null;
-                Tone.Transport.stop();
-                rhythmActive = false;
-                btnRhythm.textContent = '🥁 Rhythm Off';
-                btnRhythm.classList.remove('active');
-                console.log('🥁 Rhythm stopped');
-            }
-
-            function toggleRhythm() {
-                if (rhythmActive) {
-                    stopRhythm();
-                } else {
-                    startRhythm();
-                }
-            }
-
-            // ──────────────────────────────────
-            // MediaPipe Hands Setup
-            // ──────────────────────────────────
-            async function initHands() {
-                handsInstance = new Hands({
-                    locateFile: (file) => {
-                        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`;
-                    },
-                });
-
-                handsInstance.setOptions({
-                    maxNumHands: 2,
-                    modelComplexity: 1,
-                    minDetectionConfidence: 0.65,
-                    minTrackingConfidence: 0.5,
-                });
-
-                handsInstance.onResults(onHandResults);
-                console.log('🖐 MediaPipe Hands initialized');
-            }
-
-            function onHandResults(results) {
-                const data = { left: null, right: null };
-
-                if (results.multiHandLandmarks && results.multiHandedness) {
-                    for (let i = 0; i < results.multiHandLandmarks.length; i++) {
-                        const landmarks = results.multiHandLandmarks[i];
-                        const handedness = results.multiHandedness[i];
-                        const label = handedness.label; // "Left" or "Right" (anatomical)
-                        if (label === 'Left') {
-                            data.left = landmarks;
-                        } else if (label === 'Right') {
-                            data.right = landmarks;
-                        }
-                    }
-                }
-
-                latestHandData = data;
-                processHandData(data);
-            }
-
-            // ──────────────────────────────────
-            // Hand Data Processing
-            // ──────────────────────────────────
-            function countRaisedFingers(landmarks) {
-                if (!landmarks) return 0;
-                let count = 0;
-
-                // Index finger: tip(8) vs PIP(6)
-                if (landmarks[8].y < landmarks[6].y - 0.015) count++;
-                // Middle finger: tip(12) vs PIP(10)
-                if (landmarks[12].y < landmarks[10].y - 0.015) count++;
-                // Ring finger: tip(16) vs PIP(14)
-                if (landmarks[16].y < landmarks[14].y - 0.015) count++;
-                // Pinky: tip(20) vs PIP(18)
-                if (landmarks[20].y < landmarks[18].y - 0.01) count++;
-                // Thumb: tip(4) — check if it's extended away from palm
-                // Compare thumb tip x to thumb IP(3) x; for raised thumb, tip is further out
-                const thumbExtended =
-                    Math.abs(landmarks[4].x - landmarks[3].x) > 0.04 &&
-                    landmarks[4].y < landmarks[2].y + 0.03;
-                if (thumbExtended) count++;
-
-                return count;
-            }
-
-            function getHandCentroidY(landmarks) {
-                if (!landmarks) return 0.5;
-                // Use wrist (0) and middle finger MCP (9) average for stable vertical position
-                return (landmarks[0].y + landmarks[9].y) / 2;
-            }
-
-            function processHandData(data) {
-                // Left hand → chord selection
-                if (data.left) {
-                    const fingerCount = countRaisedFingers(data.left);
-                    const clampedCount = Math.max(1, Math.min(5, fingerCount));
-                    currentChordType = fingerToChord[clampedCount] || 'major';
-
-                    // Root note from vertical position (invert: higher hand = higher note)
-                    const handY = getHandCentroidY(data.left);
-                    // Map normalized Y (0=top, 1=bottom) to MIDI 48-74 (C3-D5)
-                    const rawMidi = Math.round((1 - handY) * 26 + 48);
-                    currentRootMidi = Math.max(48, Math.min(74, rawMidi));
-                    currentRootName = midiToRootName(currentRootMidi);
-
-                    // Update chord display
-                    const chordInfo = chordTypes[currentChordType];
-                    const displayName = `${currentRootName} ${chordInfo.name}`;
-                    chordDisplay.textContent = displayName;
-                    chordDisplay.classList.remove('idle');
-                    chordDisplay.style.color = chordInfo.color;
-                } else {
-                    // No left hand detected
-                    currentChordType = null;
-                    chordDisplay.textContent = '--';
-                    chordDisplay.classList.add('idle');
-                    chordDisplay.style.color = '#555';
-                }
-
-                // Right hand → strum detection
-                if (data.right) {
-                    const indexTip = data.right[8]; // index fingertip
-                    const wristY = data.right[0].y;
-
-                    // Define strum zone: y between 0.58 and 0.88 of normalized space
-                    const strumZoneTop = 0.58;
-                    const strumZoneBottom = 0.88;
-                    const inZone =
-                        indexTip.y >= strumZoneTop && indexTip.y <= strumZoneBottom;
-
-                    if (inZone) {
-                        if (!rightHandInStrumZone) {
-                            // Just entered strum zone
-                            rightHandPrevX = indexTip.x;
-                            rightHandInStrumZone = true;
-                        } else {
-                            // Track horizontal movement
-                            const dx = indexTip.x - rightHandPrevX;
-                            const absDx = Math.abs(dx);
-
-                            // Accumulate movement for velocity
-                            if (absDx > 0.003) {
-                                strumVelocity = Math.min(3.0, absDx * 40); // scale up
-                                rightHandPrevX = indexTip.x;
-                            }
-
-                            // Check if we've moved enough to trigger a strum
-                            const now = performance.now() / 1000;
-                            if (absDx > 0.025 && now > strumCooldownUntil && currentChordType && audioReady) {
-                                // STRUM TRIGGERED!
-                                triggerStrum(strumVelocity);
-                                strumCooldownUntil = now + 0.35; // 350ms cooldown
-                                strumVelocity = 0;
-                            }
-                        }
-                    } else {
-                        if (rightHandInStrumZone) {
-                            // Exited strum zone
-                            rightHandInStrumZone = false;
-                            rightHandPrevX = null;
-                            strumVelocity = 0;
-                        }
-                    }
-                } else {
-                    rightHandInStrumZone = false;
-                    rightHandPrevX = null;
-                    strumVelocity = 0;
-                }
-            }
-
-            function triggerStrum(velocity) {
-                if (!currentChordType || !audioReady) return;
-                const chordInfo = chordTypes[currentChordType];
-                const scaledVelocity = Math.max(0.4, Math.min(2.5, velocity));
-
-                playChordArpeggio(currentRootMidi, chordInfo.intervals, scaledVelocity);
-
-                // Visual feedback
-                strumFlashAlpha = 1.0;
-                strumIndicator.classList.add('active');
-                setTimeout(() => strumIndicator.classList.remove('active'), 280);
-
-                // Spawn particles
-                spawnParticles();
-
-                console.log(
-                    `🎸 Strum! ${currentRootName} ${chordInfo.name} | velocity: ${scaledVelocity.toFixed(2)}`
+            notes.forEach((note, i) => {
+                chordSynth.triggerAttackRelease(
+                    Tone.Frequency(note, 'midi').toFrequency(), noteDuration, now + i * spacing
+                );
+            });
+            if (intervals.length <= 4) {
+                chordSynth.triggerAttackRelease(
+                    Tone.Frequency(rootMidi - 12, 'midi').toFrequency(), noteDuration * 1.1, now
                 );
             }
+        }
 
-            function spawnParticles() {
-                const cx = canvas.width / 2;
-                const cy = canvas.height * 0.75;
-                for (let i = 0; i < 20; i++) {
-                    particles.push({
-                        x: cx + (Math.random() - 0.5) * 200,
-                        y: cy + (Math.random() - 0.5) * 40,
-                        vx: (Math.random() - 0.5) * 8,
-                        vy: -Math.random() * 6 - 3,
-                        life: 1.0,
-                        decay: 0.015 + Math.random() * 0.04,
-                        radius: 2 + Math.random() * 4,
-                        color: currentChordType ?
-                            chordTypes[currentChordType].color : '#64ffda',
-                    });
+        function startRhythm() {
+            if (!audioReady) return;
+            if (rhythmLoop) rhythmLoop.stop();
+            Tone.Transport.bpm.value = 100;
+            let beat = 0;
+            rhythmLoop = new Tone.Loop((time) => {
+                const b = beat % 8;
+                if (b === 0 || b === 4) drumKick.triggerAttackRelease('C2', '8n', time);
+                if (b === 2 || b === 6) drumSnare.triggerAttackRelease('8n', time);
+                drumHihat.triggerAttackRelease('16n', time, 0.35 + Math.random() * 0.15);
+                beat++;
+            }, '8n');
+            rhythmLoop.start(0);
+            Tone.Transport.start();
+            rhythmActive = true;
+            btnRhythm.textContent = '🥁 Rhythm On';
+            btnRhythm.classList.add('active');
+        }
+
+        function stopRhythm() {
+            if (rhythmLoop) rhythmLoop.stop();
+            rhythmLoop = null;
+            Tone.Transport.stop();
+            rhythmActive = false;
+            btnRhythm.textContent = '🥁 Rhythm Off';
+            btnRhythm.classList.remove('active');
+        }
+
+        function toggleRhythm() {
+            if (rhythmActive) stopRhythm(); else startRhythm();
+        }
+
+        // ──────────────────────────────────
+        // MediaPipe Hands
+        // ──────────────────────────────────
+        async function initHands() {
+            handsInstance = new Hands({
+                locateFile: (file) =>
+                    `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`,
+            });
+            handsInstance.setOptions({
+                maxNumHands: 2,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.65,
+                minTrackingConfidence: 0.5,
+            });
+            handsInstance.onResults(onHandResults);
+            console.log('🖐 MediaPipe Hands initialized');
+        }
+
+        function onHandResults(results) {
+            const data = { left: null, right: null };
+            if (results.multiHandLandmarks && results.multiHandedness) {
+                for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                    const label = results.multiHandedness[i].label;
+                    if (label === 'Left') data.left = results.multiHandLandmarks[i];
+                    else if (label === 'Right') data.right = results.multiHandLandmarks[i];
                 }
             }
+            latestHandData = data;
+            processHandData(data);
+        }
 
-            // ──────────────────────────────────
-            // Canvas Drawing
-            // ──────────────────────────────────
-            function resizeCanvas() {
-                const wrapper = canvasWrapper;
-                const rect = wrapper.getBoundingClientRect();
-                const dpr = Math.min(window.devicePixelRatio || 1, 2); // cap for performance
-                canvas.width = rect.width * dpr;
-                canvas.height = rect.height * dpr;
-                canvas.style.width = rect.width + 'px';
-                canvas.style.height = rect.height + 'px';
-                ctx.setTransform(1, 0, 0, 1, 0, 0);
-                ctx.scale(dpr, dpr);
-            }
+        // ──────────────────────────────────
+        // Hand Data Processing
+        // ──────────────────────────────────
+        function countRaisedFingers(landmarks) {
+            if (!landmarks) return 0;
+            let count = 0;
+            if (landmarks[8].y < landmarks[6].y - 0.015) count++;
+            if (landmarks[12].y < landmarks[10].y - 0.015) count++;
+            if (landmarks[16].y < landmarks[14].y - 0.015) count++;
+            if (landmarks[20].y < landmarks[18].y - 0.01) count++;
+            const thumbExtended =
+                Math.abs(landmarks[4].x - landmarks[3].x) > 0.04 &&
+                landmarks[4].y < landmarks[2].y + 0.03;
+            if (thumbExtended) count++;
+            return count;
+        }
 
-            function drawLandmarkPoint(x, y, radius, color, glowColor, alpha = 1) {
-                if (glowColor && alpha > 0.1) {
-                    ctx.save();
-                    ctx.globalAlpha = alpha * 0.6;
-                    ctx.shadowColor = glowColor;
-                    ctx.shadowBlur = radius * 3;
-                    ctx.beginPath();
-                    ctx.arc(x, y, radius, 0, Math.PI * 2);
-                    ctx.fillStyle = glowColor;
-                    ctx.fill();
-                    ctx.restore();
-                }
-                ctx.save();
-                ctx.globalAlpha = alpha;
-                ctx.beginPath();
-                ctx.arc(x, y, radius, 0, Math.PI * 2);
-                ctx.fillStyle = color;
-                ctx.fill();
-                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-                ctx.lineWidth = 1;
-                ctx.stroke();
-                ctx.restore();
-            }
+        function getHandCentroidY(landmarks) {
+            if (!landmarks) return 0.5;
+            return (landmarks[0].y + landmarks[9].y) / 2;
+        }
 
-            function drawHandSkeleton(landmarks, handedness, isStrumHand) {
-                if (!landmarks) return;
+        function processHandData(data) {
+            if (data.left) {
+                const fingerCount = countRaisedFingers(data.left);
+                const clampedCount = Math.max(1, Math.min(5, fingerCount));
+                currentChordType = fingerToChord[clampedCount] || 'major';
 
-                const w = canvas.width / (window.devicePixelRatio || 1);
-                const h = canvas.height / (window.devicePixelRatio || 1);
-                // Mirror x for natural "mirror" feel
-                const mirrorX = (x) => (1 - x) * w;
-                const mapY = (y) => y * h;
+                const handY = getHandCentroidY(data.left);
+                const rawMidi = Math.round((1 - handY) * 26 + 48);
+                currentRootMidi = Math.max(48, Math.min(74, rawMidi));
+                currentRootName = midiToRootName(currentRootMidi);
 
-                const points = landmarks.map(l => ({
-                    x: mirrorX(l.x),
-                    y: mapY(l.y),
-                }));
-
-                // Connection definitions for hand skeleton
-                const connections = [
-                    [0, 1],
-                    [1, 2],
-                    [2, 3],
-                    [3, 4], // Thumb
-                    [0, 5],
-                    [5, 6],
-                    [6, 7],
-                    [7, 8], // Index
-                    [0, 9],
-                    [9, 10],
-                    [10, 11],
-                    [11, 12], // Middle
-                    [0, 13],
-                    [13, 14],
-                    [14, 15],
-                    [15, 16], // Ring
-                    [0, 17],
-                    [17, 18],
-                    [18, 19],
-                    [19, 20], // Pinky
-                    [5, 9],
-                    [9, 13],
-                    [13, 17], // Palm connections
-                ];
-
-                // Draw connections
-                ctx.save();
-                ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-                ctx.lineWidth = 1.5;
-                ctx.lineCap = 'round';
-                ctx.shadowColor = 'rgba(255,255,255,0.15)';
-                ctx.shadowBlur = 3;
-                connections.forEach(([a, b]) => {
-                    ctx.beginPath();
-                    ctx.moveTo(points[a].x, points[a].y);
-                    ctx.lineTo(points[b].x, points[b].y);
-                    ctx.stroke();
-                });
-                ctx.restore();
-
-                // Determine raised fingers for left hand coloring
-                let raisedFingers = new Set();
-                if (handedness === 'Left' && landmarks) {
-                    const tips = [4, 8, 12, 16, 20];
-                    const pips = [3, 6, 10, 14, 18];
-                    const fingerNames = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-                    fingerNames.forEach((_, i) => {
-                        let raised = false;
-                        if (i === 0) {
-                            // Thumb
-                            raised =
-                                Math.abs(landmarks[tips[i]].x - landmarks[pips[i]].x) > 0.04 &&
-                                landmarks[tips[i]].y < landmarks[2].y + 0.03;
-                        } else {
-                            raised = landmarks[tips[i]].y < landmarks[pips[i]].y - 0.012;
-                        }
-                        if (raised) raisedFingers.add(tips[i]);
-                    });
-                }
-
-                // Draw joints
-                const fingertipIndices = [4, 8, 12, 16, 20];
-                points.forEach((p, i) => {
-                    const isFingertip = fingertipIndices.includes(i);
-                    const isRaised = raisedFingers.has(i);
-                    const radius = isFingertip ? 7 : 3.5;
-                    const color = isRaised ?
-                        '#64ffda' :
-                        isFingertip ?
-                        'rgba(255,255,255,0.85)' :
-                        'rgba(255,255,255,0.5)';
-                    const glow = isRaised ? '#64ffda' : isFingertip ? 'rgba(255,255,255,0.5)' :
-                        null;
-                    drawLandmarkPoint(p.x, p.y, radius, color, glow);
-                });
-
-                // Highlight wrist
-                drawLandmarkPoint(points[0].x, points[0].y, 6, 'rgba(255,200,150,0.7)',
-                    'rgba(255,200,150,0.4)');
-            }
-
-            function drawStrumZone() {
-                const w = canvas.width / (window.devicePixelRatio || 1);
-                const h = canvas.height / (window.devicePixelRatio || 1);
-                const zoneTop = h * 0.58;
-                const zoneBottom = h * 0.88;
-                const zoneHeight = zoneBottom - zoneTop;
-
-                const guideX = 16;
-                const guideY = 42;
-                const guideW = 92;
-                const guideH = h - guideY - 42;
-                const rootMin = 48;
-                const rootMax = 74;
-                const rootRange = rootMax - rootMin;
-
-                ctx.save();
-                ctx.fillStyle = 'rgba(255,255,255,0.04)';
-                ctx.fillRect(guideX, guideY, guideW, guideH);
-                const guideGrad = ctx.createLinearGradient(0, guideY, 0, guideY + guideH);
-                guideGrad.addColorStop(0, 'rgba(100,255,218,0.08)');
-                guideGrad.addColorStop(1, 'rgba(255,110,199,0.08)');
-                ctx.fillStyle = guideGrad;
-                ctx.fillRect(guideX, guideY, guideW, guideH);
-                ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-                ctx.lineWidth = 1;
-                ctx.strokeRect(guideX, guideY, guideW, guideH);
-                ctx.restore();
-
-                const guideNotes = [48, 50, 52, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74];
-                ctx.save();
-                ctx.font = '11px "Segoe UI", system-ui, sans-serif';
-                ctx.textAlign = 'left';
-                ctx.textBaseline = 'middle';
-                guideNotes.forEach((note) => {
-                    const norm = (note - rootMin) / rootRange;
-                    const noteY = guideY + guideH - norm * guideH;
-                    const octave = Math.floor(note / 12) - 1;
-                    ctx.globalAlpha = note % 12 === 0 ? 0.9 : 0.55;
-                    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-                    ctx.fillText(`${midiToRootName(note)}${octave}`, guideX + guideW + 8, noteY);
-                    ctx.strokeStyle = `rgba(255,255,255,${note % 12 === 0 ? 0.25 : 0.12})`;
-                    ctx.lineWidth = 1;
-                    ctx.beginPath();
-                    ctx.moveTo(guideX + guideW - 6, noteY);
-                    ctx.lineTo(guideX + guideW, noteY);
-                    ctx.stroke();
-                });
-                ctx.restore();
-
-                if (latestHandData && latestHandData.left) {
-                    const handY = Math.max(0, Math.min(1, getHandCentroidY(latestHandData.left)));
-                    const handLineY = guideY + handY * guideH;
-                    ctx.save();
-                    ctx.setLineDash([4, 4]);
-                    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-                    ctx.lineWidth = 1;
-                    ctx.beginPath();
-                    ctx.moveTo(guideX - 4, handLineY);
-                    ctx.lineTo(guideX + guideW + 4, handLineY);
-                    ctx.stroke();
-                    ctx.restore();
-                }
-
-                if (currentChordType && latestHandData && latestHandData.left) {
-                    const rootNorm = Math.max(0, Math.min(1, (currentRootMidi - rootMin) / rootRange));
-                    const rootY = guideY + guideH - rootNorm * guideH;
-                    const chordInfo = chordTypes[currentChordType];
-                    ctx.save();
-                    ctx.setLineDash([6, 4]);
-                    ctx.strokeStyle = chordInfo.color;
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.moveTo(guideX, rootY);
-                    ctx.lineTo(guideX + guideW, rootY);
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                    ctx.fillStyle = chordInfo.color;
-                    ctx.beginPath();
-                    ctx.arc(guideX + guideW / 2, rootY, 6, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(`${currentRootName} ${chordInfo.name}`, guideX + guideW / 2, rootY - 16);
-                    ctx.restore();
-                }
-
-                ctx.save();
-                ctx.fillStyle = 'rgba(255,255,255,0.75)';
-                ctx.font = '12px "Segoe UI", system-ui, sans-serif';
-                ctx.textAlign = 'left';
-                ctx.fillText('Root guide', guideX, guideY - 14);
-                ctx.restore();
-
-                // Glow background
-                const glowGrad = ctx.createLinearGradient(0, zoneTop, 0, zoneBottom);
-                const baseAlpha = rightHandInStrumZone ? 0.2 : 0.07;
-                const flashAlpha = strumFlashAlpha * 0.5;
-                const totalAlpha = Math.min(1, baseAlpha + flashAlpha);
-
-                glowGrad.addColorStop(0, `rgba(255,110,199,0)`);
-                glowGrad.addColorStop(0.3, `rgba(255,110,199,${totalAlpha})`);
-                glowGrad.addColorStop(0.5, `rgba(255,110,199,${totalAlpha * 1.3})`);
-                glowGrad.addColorStop(0.7, `rgba(255,110,199,${totalAlpha})`);
-                glowGrad.addColorStop(1, `rgba(255,110,199,0)`);
-
-                ctx.fillStyle = glowGrad;
-                ctx.fillRect(0, zoneTop, w, zoneHeight);
-
-                // Top and bottom edge lines
-                ctx.save();
-                ctx.strokeStyle = `rgba(255,110,199,${0.3 + flashAlpha})`;
-                ctx.lineWidth = 2;
-                ctx.shadowColor = `rgba(255,110,199,${0.5 + flashAlpha})`;
-                ctx.shadowBlur = 12;
-                ctx.beginPath();
-                ctx.moveTo(0, zoneTop);
-                ctx.lineTo(w, zoneTop);
-                ctx.stroke();
-                ctx.beginPath();
-                ctx.moveTo(0, zoneBottom);
-                ctx.lineTo(w, zoneBottom);
-                ctx.stroke();
-                ctx.restore();
-
-                // Label
-                ctx.save();
-                ctx.fillStyle = `rgba(255,255,255,${0.35 + flashAlpha})`;
-                ctx.font = '13px "Segoe UI", system-ui, sans-serif';
-                ctx.textAlign = 'center';
-                ctx.letterSpacing = '0.06em';
-                ctx.fillText('— STRUM ZONE —', w / 2, zoneTop - 10);
-                ctx.restore();
-
-                // Right hand indicator in zone
-                if (rightHandInStrumZone && latestHandData && latestHandData.right) {
-                    const indexTip = latestHandData.right[8];
-                    const ix = (1 - indexTip.x) * w;
-                    const iy = indexTip.y * h;
-                    ctx.save();
-                    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-                    ctx.shadowColor = '#ff6ec7';
-                    ctx.shadowBlur = 20;
-                    ctx.beginPath();
-                    ctx.arc(ix, iy, 8, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.restore();
-                }
-            }
-
-            function drawParticles() {
-                const w = canvas.width / (window.devicePixelRatio || 1);
-                const h = canvas.height / (window.devicePixelRatio || 1);
-
-                particles = particles.filter(p => p.life > 0);
-                particles.forEach(p => {
-                    p.x += p.vx;
-                    p.y += p.vy;
-                    p.vy += 0.15; // gravity
-                    p.life -= p.decay;
-                    if (p.life <= 0) return;
-
-                    ctx.save();
-                    ctx.globalAlpha = p.life;
-                    ctx.fillStyle = p.color;
-                    ctx.shadowColor = p.color;
-                    ctx.shadowBlur = p.radius * 2;
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, p.radius * p.life, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.restore();
-                });
-            }
-
-            function drawUI() {
-                const w = canvas.width / (window.devicePixelRatio || 1);
-                const h = canvas.height / (window.devicePixelRatio || 1);
-
-                // Chord type badge (top-left)
-                if (currentChordType && latestHandData && latestHandData.left) {
-                    const chordInfo = chordTypes[currentChordType];
-                    const badgeX = 20;
-                    const badgeY = 40;
-                    ctx.save();
-                    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-                    ctx.strokeStyle = chordInfo.color;
-                    ctx.lineWidth = 1.5;
-                    ctx.shadowColor = chordInfo.color;
-                    ctx.shadowBlur = 10;
-                    const badgeW = 130;
-                    const badgeH = 42;
-                    ctx.beginPath();
-                    ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 10);
-                    ctx.fill();
-                    ctx.stroke();
-                    ctx.fillStyle = chordInfo.color;
-                    ctx.font = 'bold 15px "Segoe UI", system-ui, sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(`${currentRootName} ${chordInfo.name}`, badgeX + badgeW / 2, badgeY +
-                        badgeH / 2 + 5);
-                    ctx.restore();
-                }
-
-                // Finger count badge (if left hand present)
-                if (latestHandData && latestHandData.left) {
-                    const fc = countRaisedFingers(latestHandData.left);
-                    const fBadgeX = 20;
-                    const fBadgeY = 95;
-                    ctx.save();
-                    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-                    ctx.fillRect(fBadgeX, fBadgeY, 100, 28);
-                    ctx.fillStyle = '#ccc';
-                    ctx.font = '12px "Segoe UI", system-ui, sans-serif';
-                    ctx.textAlign = 'left';
-                    ctx.fillText(`Fingers: ${fc}`, fBadgeX + 10, fBadgeY + 19);
-                    ctx.restore();
-                }
-
-                // "No hands" message
-                if (!latestHandData || (!latestHandData.left && !latestHandData.right)) {
-                    ctx.save();
-                    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-                    ctx.font = '16px "Segoe UI", system-ui, sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.fillText('Show your hands to the camera', w / 2, h / 2);
-                    ctx.restore();
-                }
-            }
-
-            function drawFrame() {
-                const w = canvas.width / (window.devicePixelRatio || 1);
-                const h = canvas.height / (window.devicePixelRatio || 1);
-
-                // Clear
-                ctx.clearRect(0, 0, w, h);
-
-                // Background
-                const bgGrad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.8);
-                bgGrad.addColorStop(0, '#1a1a2e');
-                bgGrad.addColorStop(1, '#0a0a0f');
-                ctx.fillStyle = bgGrad;
-                ctx.fillRect(0, 0, w, h);
-
-                // Subtle grid
-                ctx.save();
-                ctx.strokeStyle = 'rgba(255,255,255,0.02)';
-                ctx.lineWidth = 0.5;
-                const gridSize = 40;
-                for (let x = gridSize; x < w; x += gridSize) {
-                    ctx.beginPath();
-                    ctx.moveTo(x, 0);
-                    ctx.lineTo(x, h);
-                    ctx.stroke();
-                }
-                for (let y = gridSize; y < h; y += gridSize) {
-                    ctx.beginPath();
-                    ctx.moveTo(0, y);
-                    ctx.lineTo(w, y);
-                    ctx.stroke();
-                }
-                ctx.restore();
-
-                // Draw strum zone
-                drawStrumZone();
-
-                // Draw hands
-                if (latestHandData) {
-                    if (latestHandData.left) {
-                        drawHandSkeleton(latestHandData.left, 'Left', false);
-                    }
-                    if (latestHandData.right) {
-                        drawHandSkeleton(latestHandData.right, 'Right', true);
-                    }
-                }
-
-                // Draw particles
-                drawParticles();
-
-                // Draw UI overlays
-                drawUI();
-
-                // Decay strum flash
-                if (strumFlashAlpha > 0) {
-                    strumFlashAlpha = Math.max(0, strumFlashAlpha - 0.04);
-                }
-
-                // FPS-friendly request
-                requestAnimationFrame(drawFrame);
-            }
-
-            // ──────────────────────────────────
-            // Video Processing Loop
-            // ──────────────────────────────────
-            async function processVideoFrame() {
-                if (!isRunning || !handsInstance) return;
-                try {
-                    await handsInstance.send({ image: video });
-                } catch (e) {
-                    // Occasionally fails if video isn't ready; silently retry
-                }
-                if (isRunning) {
-                    requestAnimationFrame(() => processVideoFrame());
-                }
-            }
-
-            // ──────────────────────────────────
-            // Camera Setup
-            // ──────────────────────────────────
-            async function setupCamera() {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        video: {
-                            width: { ideal: 640 },
-                            height: { ideal: 480 },
-                            facingMode: 'user',
-                        },
-                    });
-                    video.srcObject = stream;
-                    video.setAttribute('playsinline', '');
-                    video.setAttribute('autoplay', '');
-                    video.setAttribute('muted', '');
-                    await video.play();
-                    console.log('📷 Camera started');
-                    return true;
-                } catch (err) {
-                    console.error('Camera error:', err);
-                    alert(
-                        'Could not access webcam. Please ensure you have granted camera permissions and are using HTTPS or localhost.'
-                    );
-                    return false;
-                }
-            }
-
-            // ──────────────────────────────────
-            // Start / Stop
-            // ──────────────────────────────────
-            async function startApp() {
-                if (isRunning) return;
-
-                // Initialize audio
-                await initAudio();
-
-                // Setup camera
-                const camReady = await setupCamera();
-                if (!camReady) return;
-
-                // Initialize MediaPipe Hands
-                if (!handsInstance) {
-                    await initHands();
-                }
-
-                // Start processing
-                isRunning = true;
-                startOverlay.classList.add('hidden');
-                resizeCanvas();
-                drawFrame();
-                processVideoFrame();
-
-                console.log('🚀 StrumCloud is running!');
-            }
-
-            function stopApp() {
-                isRunning = false;
-                if (video.srcObject) {
-                    video.srcObject.getTracks().forEach(track => track.stop());
-                    video.srcObject = null;
-                }
-                if (rhythmActive) stopRhythm();
-                latestHandData = null;
+                const chordInfo = chordTypes[currentChordType];
+                chordDisplay.textContent = `${currentRootName} ${chordInfo.name}`;
+                chordDisplay.classList.remove('idle');
+                chordDisplay.style.color = chordInfo.color;
+            } else {
                 currentChordType = null;
                 chordDisplay.textContent = '--';
                 chordDisplay.classList.add('idle');
                 chordDisplay.style.color = '#555';
-                rightHandInStrumZone = false;
-                particles = [];
-                strumFlashAlpha = 0;
-                console.log('⏹ StrumCloud stopped');
             }
 
-            // ──────────────────────────────────
-            // Event Listeners
-            // ──────────────────────────────────
-            btnStart.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                await startApp();
-            });
+            if (data.right) {
+                const indexTip = data.right[8];
+                const inZone = indexTip.y >= 0.58 && indexTip.y <= 0.88;
 
-            startOverlay.addEventListener('click', async (e) => {
-                if (e.target === btnStart) return;
-                await startApp();
-            });
-
-            btnRhythm.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (!audioReady) {
-                    initAudio().then(() => toggleRhythm());
+                if (inZone) {
+                    if (!rightHandInStrumZone) {
+                        rightHandPrevX = indexTip.x;
+                        rightHandInStrumZone = true;
+                    } else {
+                        const dx = indexTip.x - rightHandPrevX;
+                        const absDx = Math.abs(dx);
+                        if (absDx > 0.003) {
+                            strumVelocity = Math.min(3.0, absDx * 40);
+                            rightHandPrevX = indexTip.x;
+                        }
+                        const now = performance.now() / 1000;
+                        if (absDx > 0.025 && now > strumCooldownUntil && currentChordType && audioReady) {
+                            triggerStrum(strumVelocity);
+                            strumCooldownUntil = now + 0.35;
+                            strumVelocity = 0;
+                        }
+                    }
                 } else {
-                    toggleRhythm();
+                    if (rightHandInStrumZone) {
+                        rightHandInStrumZone = false;
+                        rightHandPrevX = null;
+                        strumVelocity = 0;
+                    }
                 }
-            });
+            } else {
+                rightHandInStrumZone = false;
+                rightHandPrevX = null;
+                strumVelocity = 0;
+            }
+        }
 
-            // Keyboard shortcuts
-            window.addEventListener('keydown', (e) => {
-                switch (e.key.toLowerCase()) {
-                    case 'r':
-                        if (audioReady) toggleRhythm();
-                        break;
-                    case 's':
-                        if (!isRunning) startApp();
-                        break;
-                    case 'escape':
-                        if (isRunning) stopApp();
-                        startOverlay.classList.remove('hidden');
-                        break;
-                    default:
-                        break;
-                }
-            });
+        function triggerStrum(velocity) {
+            if (!currentChordType || !audioReady) return;
+            const chordInfo = chordTypes[currentChordType];
+            const scaledVelocity = Math.max(0.4, Math.min(2.5, velocity));
+            playChordArpeggio(currentRootMidi, chordInfo.intervals, scaledVelocity);
+            strumFlashAlpha = 1.0;
+            strumIndicator.classList.add('active');
+            setTimeout(() => strumIndicator.classList.remove('active'), 280);
+            spawnParticles();
+            console.log(`🎸 Strum! ${currentRootName} ${chordInfo.name} | v:${scaledVelocity.toFixed(2)}`);
+        }
 
-            // Handle resize
-            window.addEventListener('resize', () => {
-                if (isRunning) resizeCanvas();
-            });
+        function spawnParticles() {
+            const cx = canvas.width / 2;
+            const cy = canvas.height * 0.75;
+            for (let i = 0; i < 20; i++) {
+                particles.push({
+                    x: cx + (Math.random() - 0.5) * 200,
+                    y: cy + (Math.random() - 0.5) * 40,
+                    vx: (Math.random() - 0.5) * 8,
+                    vy: -Math.random() * 6 - 3,
+                    life: 1.0,
+                    decay: 0.015 + Math.random() * 0.04,
+                    radius: 2 + Math.random() * 4,
+                    color: currentChordType ? chordTypes[currentChordType].color : '#64ffda',
+                });
+            }
+        }
 
-            // Handle visibility change — pause when tab hidden
-            document.addEventListener('visibilitychange', () => {
-                if (document.hidden && rhythmActive) {
-                    stopRhythm();
-                    // Flag to restart when visible
-                    document._wasRhythmActive = true;
-                } else if (!document.hidden && document._wasRhythmActive && isRunning && audioReady) {
-                    startRhythm();
-                    document._wasRhythmActive = false;
-                }
-            });
+        // ──────────────────────────────────
+        // Canvas Drawing
+        // ──────────────────────────────────
+        function resizeCanvas() {
+            const rect = canvasWrapper.getBoundingClientRect();
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.scale(dpr, dpr);
+        }
 
-            // ──────────────────────────────────
-            // Initial Setup
-            // ──────────────────────────────────
-            function init() {
-                resizeCanvas();
-                // Draw initial state on canvas
-                const w = canvas.width / (window.devicePixelRatio || 1);
-                const h = canvas.height / (window.devicePixelRatio || 1);
-                ctx.fillStyle = '#0a0a0f';
-                ctx.fillRect(0, 0, w, h);
-                ctx.fillStyle = 'rgba(255,255,255,0.5)';
-                ctx.font = '18px "Segoe UI", system-ui, sans-serif';
-                ctx.textAlign = 'center'; 
-                ctx.fillText('Click "Start" to begin', w / 2, h / 2);
-                console.log('🎸 StrumCloud ready — Click Start to begin');
+        function drawLandmarkPoint(x, y, radius, color, glowColor, alpha = 1) {
+            if (glowColor && alpha > 0.1) {
+                ctx.save();
+                ctx.globalAlpha = alpha * 0.6;
+                ctx.shadowColor = glowColor;
+                ctx.shadowBlur = radius * 3;
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fillStyle = glowColor;
+                ctx.fill();
+                ctx.restore();
+            }
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawHandSkeleton(landmarks, handedness, isStrumHand) {
+            if (!landmarks) return;
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+            const mirrorX = (x) => (1 - x) * w;
+            const mapY = (y) => y * h;
+            const points = landmarks.map(l => ({ x: mirrorX(l.x), y: mapY(l.y) }));
+
+            const connections = [
+                [0,1],[1,2],[2,3],[3,4],
+                [0,5],[5,6],[6,7],[7,8],
+                [0,9],[9,10],[10,11],[11,12],
+                [0,13],[13,14],[14,15],[15,16],
+                [0,17],[17,18],[18,19],[19,20],
+                [5,9],[9,13],[13,17],
+            ];
+
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+            ctx.lineWidth = 1.5;
+            ctx.lineCap = 'round';
+            ctx.shadowColor = 'rgba(255,255,255,0.15)';
+            ctx.shadowBlur = 3;
+            connections.forEach(([a, b]) => {
+                ctx.beginPath();
+                ctx.moveTo(points[a].x, points[a].y);
+                ctx.lineTo(points[b].x, points[b].y);
+                ctx.stroke();
+            });
+            ctx.restore();
+
+            let raisedFingers = new Set();
+            if (handedness === 'Left' && landmarks) {
+                const tips = [4, 8, 12, 16, 20];
+                const pips = [3, 6, 10, 14, 18];
+                tips.forEach((tip, i) => {
+                    let raised = false;
+                    if (i === 0) {
+                        raised = Math.abs(landmarks[tips[i]].x - landmarks[pips[i]].x) > 0.04 &&
+                                 landmarks[tips[i]].y < landmarks[2].y + 0.03;
+                    } else {
+                        raised = landmarks[tips[i]].y < landmarks[pips[i]].y - 0.012;
+                    }
+                    if (raised) raisedFingers.add(tips[i]);
+                });
             }
 
-            init();
-        })();
-    </script>
+            const fingertipIndices = [4, 8, 12, 16, 20];
+            points.forEach((p, i) => {
+                const isFingertip = fingertipIndices.includes(i);
+                const isRaised = raisedFingers.has(i);
+                const radius = isFingertip ? 7 : 3.5;
+                const color = isRaised ? '#64ffda' :
+                    isFingertip ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)';
+                const glow = isRaised ? '#64ffda' :
+                    isFingertip ? 'rgba(255,255,255,0.5)' : null;
+                drawLandmarkPoint(p.x, p.y, radius, color, glow);
+            });
+
+            drawLandmarkPoint(points[0].x, points[0].y, 6, 'rgba(255,200,150,0.7)', 'rgba(255,200,150,0.4)');
+        }
+
+        function drawStrumZone() {
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+            const zoneTop = h * 0.58;
+            const zoneBottom = h * 0.88;
+            const zoneHeight = zoneBottom - zoneTop;
+
+            // Scale note guide to canvas width — narrower on mobile
+            const isMobile = w < 400;
+            const guideX = isMobile ? 10 : 16;
+            const guideW = isMobile ? 60 : 92;
+            const guideY = 42;
+            const guideH = h - guideY - 42;
+            const rootMin = 48, rootMax = 74, rootRange = rootMax - rootMin;
+
+            ctx.save();
+            ctx.fillStyle = 'rgba(255,255,255,0.04)';
+            ctx.fillRect(guideX, guideY, guideW, guideH);
+            const guideGrad = ctx.createLinearGradient(0, guideY, 0, guideY + guideH);
+            guideGrad.addColorStop(0, 'rgba(100,255,218,0.08)');
+            guideGrad.addColorStop(1, 'rgba(255,110,199,0.08)');
+            ctx.fillStyle = guideGrad;
+            ctx.fillRect(guideX, guideY, guideW, guideH);
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(guideX, guideY, guideW, guideH);
+            ctx.restore();
+
+            const guideNotes = [48,50,52,55,57,59,60,62,64,65,67,69,71,72,74];
+            ctx.save();
+            ctx.font = `${isMobile ? 9 : 11}px "Segoe UI", system-ui, sans-serif`;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            guideNotes.forEach((note) => {
+                const norm = (note - rootMin) / rootRange;
+                const noteY = guideY + guideH - norm * guideH;
+                const octave = Math.floor(note / 12) - 1;
+                ctx.globalAlpha = note % 12 === 0 ? 0.9 : 0.55;
+                ctx.fillStyle = 'rgba(255,255,255,0.75)';
+                // On mobile only show octave notes to avoid clutter
+                if (!isMobile || note % 12 === 0) {
+                    ctx.fillText(`${midiToRootName(note)}${octave}`, guideX + guideW + 4, noteY);
+                }
+                ctx.strokeStyle = `rgba(255,255,255,${note % 12 === 0 ? 0.25 : 0.12})`;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(guideX + guideW - 6, noteY);
+                ctx.lineTo(guideX + guideW, noteY);
+                ctx.stroke();
+            });
+            ctx.restore();
+
+            if (latestHandData && latestHandData.left) {
+                const handY = Math.max(0, Math.min(1, getHandCentroidY(latestHandData.left)));
+                const handLineY = guideY + handY * guideH;
+                ctx.save();
+                ctx.setLineDash([4, 4]);
+                ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(guideX - 4, handLineY);
+                ctx.lineTo(guideX + guideW + 4, handLineY);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            if (currentChordType && latestHandData && latestHandData.left) {
+                const rootNorm = Math.max(0, Math.min(1, (currentRootMidi - rootMin) / rootRange));
+                const rootY = guideY + guideH - rootNorm * guideH;
+                const chordInfo = chordTypes[currentChordType];
+                ctx.save();
+                ctx.setLineDash([6, 4]);
+                ctx.strokeStyle = chordInfo.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(guideX, rootY);
+                ctx.lineTo(guideX + guideW, rootY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = chordInfo.color;
+                ctx.beginPath();
+                ctx.arc(guideX + guideW / 2, rootY, isMobile ? 4 : 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.font = `bold ${isMobile ? 11 : 13}px "Segoe UI", system-ui, sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.fillText(`${currentRootName} ${chordInfo.name}`, guideX + guideW / 2, rootY - 14);
+                ctx.restore();
+            }
+
+            ctx.save();
+            ctx.fillStyle = 'rgba(255,255,255,0.75)';
+            ctx.font = `${isMobile ? 10 : 12}px "Segoe UI", system-ui, sans-serif`;
+            ctx.textAlign = 'left';
+            ctx.fillText('Root', guideX, guideY - (isMobile ? 10 : 14));
+            ctx.restore();
+
+            // Strum zone glow
+            const glowGrad = ctx.createLinearGradient(0, zoneTop, 0, zoneBottom);
+            const baseAlpha = rightHandInStrumZone ? 0.2 : 0.07;
+            const flashAlpha = strumFlashAlpha * 0.5;
+            const totalAlpha = Math.min(1, baseAlpha + flashAlpha);
+            glowGrad.addColorStop(0, `rgba(255,110,199,0)`);
+            glowGrad.addColorStop(0.3, `rgba(255,110,199,${totalAlpha})`);
+            glowGrad.addColorStop(0.5, `rgba(255,110,199,${totalAlpha * 1.3})`);
+            glowGrad.addColorStop(0.7, `rgba(255,110,199,${totalAlpha})`);
+            glowGrad.addColorStop(1, `rgba(255,110,199,0)`);
+            ctx.fillStyle = glowGrad;
+            ctx.fillRect(0, zoneTop, w, zoneHeight);
+
+            ctx.save();
+            ctx.strokeStyle = `rgba(255,110,199,${0.3 + flashAlpha})`;
+            ctx.lineWidth = 2;
+            ctx.shadowColor = `rgba(255,110,199,${0.5 + flashAlpha})`;
+            ctx.shadowBlur = 12;
+            ctx.beginPath(); ctx.moveTo(0, zoneTop); ctx.lineTo(w, zoneTop); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, zoneBottom); ctx.lineTo(w, zoneBottom); ctx.stroke();
+            ctx.restore();
+
+            ctx.save();
+            ctx.fillStyle = `rgba(255,255,255,${0.35 + flashAlpha})`;
+            ctx.font = `${isMobile ? 11 : 13}px "Segoe UI", system-ui, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.fillText('— STRUM ZONE —', w / 2, zoneTop - 10);
+            ctx.restore();
+
+            if (rightHandInStrumZone && latestHandData && latestHandData.right) {
+                const indexTip = latestHandData.right[8];
+                const ix = (1 - indexTip.x) * w;
+                const iy = indexTip.y * h;
+                ctx.save();
+                ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                ctx.shadowColor = '#ff6ec7';
+                ctx.shadowBlur = 20;
+                ctx.beginPath();
+                ctx.arc(ix, iy, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function drawParticles() {
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+            particles = particles.filter(p => p.life > 0);
+            particles.forEach(p => {
+                p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life -= p.decay;
+                if (p.life <= 0) return;
+                ctx.save();
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = p.radius * 2;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius * p.life, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+        }
+
+        function drawUI() {
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+            const isMobile = w < 400;
+
+            if (currentChordType && latestHandData && latestHandData.left) {
+                const chordInfo = chordTypes[currentChordType];
+                const badgeX = isMobile ? 12 : 20;
+                const badgeY = isMobile ? 30 : 40;
+                const badgeW = isMobile ? 110 : 130;
+                const badgeH = isMobile ? 34 : 42;
+                ctx.save();
+                ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                ctx.strokeStyle = chordInfo.color;
+                ctx.lineWidth = 1.5;
+                ctx.shadowColor = chordInfo.color;
+                ctx.shadowBlur = 10;
+                ctx.beginPath();
+                ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 10);
+                ctx.fill(); ctx.stroke();
+                ctx.fillStyle = chordInfo.color;
+                ctx.font = `bold ${isMobile ? 12 : 15}px "Segoe UI", system-ui, sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.fillText(`${currentRootName} ${chordInfo.name}`, badgeX + badgeW / 2, badgeY + badgeH / 2 + 5);
+                ctx.restore();
+            }
+
+            if (latestHandData && latestHandData.left) {
+                const fc = countRaisedFingers(latestHandData.left);
+                const fBadgeX = isMobile ? 12 : 20;
+                const fBadgeY = isMobile ? 74 : 95;
+                ctx.save();
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(fBadgeX, fBadgeY, isMobile ? 80 : 100, 28);
+                ctx.fillStyle = '#ccc';
+                ctx.font = `${isMobile ? 11 : 12}px "Segoe UI", system-ui, sans-serif`;
+                ctx.textAlign = 'left';
+                ctx.fillText(`Fingers: ${fc}`, fBadgeX + 8, fBadgeY + 19);
+                ctx.restore();
+            }
+
+            if (!latestHandData || (!latestHandData.left && !latestHandData.right)) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                ctx.font = `${isMobile ? 14 : 16}px "Segoe UI", system-ui, sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.fillText('Show your hands to the camera', w / 2, h / 2);
+                ctx.restore();
+            }
+        }
+
+        function drawFrame() {
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+
+            ctx.clearRect(0, 0, w, h);
+
+            const bgGrad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w * 0.8);
+            bgGrad.addColorStop(0, '#1a1a2e');
+            bgGrad.addColorStop(1, '#0a0a0f');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(0, 0, w, h);
+
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+            ctx.lineWidth = 0.5;
+            const gridSize = 40;
+            for (let x = gridSize; x < w; x += gridSize) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+            }
+            for (let y = gridSize; y < h; y += gridSize) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+            }
+            ctx.restore();
+
+            drawStrumZone();
+
+            if (latestHandData) {
+                if (latestHandData.left)  drawHandSkeleton(latestHandData.left, 'Left', false);
+                if (latestHandData.right) drawHandSkeleton(latestHandData.right, 'Right', true);
+            }
+
+            drawParticles();
+            drawUI();
+
+            if (strumFlashAlpha > 0) strumFlashAlpha = Math.max(0, strumFlashAlpha - 0.04);
+            requestAnimationFrame(drawFrame);
+        }
+
+        // ──────────────────────────────────
+        // Video Processing Loop
+        // ──────────────────────────────────
+        async function processVideoFrame() {
+            if (!isRunning || !handsInstance) return;
+            try { await handsInstance.send({ image: video }); } catch (e) {}
+            if (isRunning) requestAnimationFrame(() => processVideoFrame());
+        }
+
+        // ──────────────────────────────────
+        // Camera Setup
+        // ──────────────────────────────────
+        async function setupCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: 'user',
+                    },
+                });
+                video.srcObject = stream;
+                video.setAttribute('playsinline', '');
+                video.setAttribute('autoplay', '');
+                video.setAttribute('muted', '');
+                await video.play();
+                console.log('📷 Camera started');
+                return true;
+            } catch (err) {
+                console.error('Camera error:', err);
+                alert('Could not access camera. Please grant camera permissions and use HTTPS or localhost.');
+                return false;
+            }
+        }
+
+        // ──────────────────────────────────
+        // Start / Stop
+        // ──────────────────────────────────
+        async function startApp() {
+            if (isRunning) return;
+            await initAudio();
+            const camReady = await setupCamera();
+            if (!camReady) return;
+            if (!handsInstance) await initHands();
+            isRunning = true;
+            startOverlay.classList.add('hidden');
+            resizeCanvas();
+            drawFrame();
+            processVideoFrame();
+            console.log('🚀 StrumCloud is running!');
+        }
+
+        function stopApp() {
+            isRunning = false;
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(t => t.stop());
+                video.srcObject = null;
+            }
+            if (rhythmActive) stopRhythm();
+            latestHandData = null;
+            currentChordType = null;
+            chordDisplay.textContent = '--';
+            chordDisplay.classList.add('idle');
+            chordDisplay.style.color = '#555';
+            rightHandInStrumZone = false;
+            particles = [];
+            strumFlashAlpha = 0;
+            console.log('⏹ StrumCloud stopped');
+        }
+
+        // ──────────────────────────────────
+        // Event Listeners
+        // ──────────────────────────────────
+        btnStart.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await startApp();
+        });
+
+        startOverlay.addEventListener('click', async (e) => {
+            if (e.target === btnStart) return;
+            await startApp();
+        });
+
+        // Touch support for start overlay
+        startOverlay.addEventListener('touchend', async (e) => {
+            if (e.target === btnStart) return;
+            e.preventDefault();
+            await startApp();
+        }, { passive: false });
+
+        btnRhythm.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!audioReady) initAudio().then(() => toggleRhythm());
+            else toggleRhythm();
+        });
+
+        // Keyboard shortcuts
+        window.addEventListener('keydown', (e) => {
+            switch (e.key.toLowerCase()) {
+                case 'r': if (audioReady) toggleRhythm(); break;
+                case 's': if (!isRunning) startApp(); break;
+                case 'escape':
+                    if (isRunning) stopApp();
+                    startOverlay.classList.remove('hidden');
+                    break;
+            }
+        });
+
+        // Handle resize and orientation changes
+        let resizeTimer;
+        const handleResize = () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                if (isRunning) resizeCanvas();
+            }, 100);
+        };
+        window.addEventListener('resize', handleResize);
+        window.addEventListener('orientationchange', handleResize);
+
+        // Screen orientation API (more reliable on mobile)
+        if (screen.orientation) {
+            screen.orientation.addEventListener('change', handleResize);
+        }
+
+        // Pause rhythm when tab hidden
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && rhythmActive) {
+                stopRhythm();
+                document._wasRhythmActive = true;
+            } else if (!document.hidden && document._wasRhythmActive && isRunning && audioReady) {
+                startRhythm();
+                document._wasRhythmActive = false;
+            }
+        });
+
+        // ──────────────────────────────────
+        // Initial Setup
+        // ──────────────────────────────────
+        function init() {
+            resizeCanvas();
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+            ctx.fillStyle = '#0a0a0f';
+            ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            ctx.font = '18px "Segoe UI", system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Tap "Start" to begin', w / 2, h / 2);
+            console.log('🎸 StrumCloud ready — Tap Start to begin');
+        }
+
+        init();
+    })();
+</script>
+```
+
 </body>
 </html>
